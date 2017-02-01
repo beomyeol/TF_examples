@@ -41,7 +41,7 @@ def main(_):
     server.join()
   elif FLAGS.job_name == "worker":
     mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
-    is_chief = (FLAGS.task_index == 1)
+    is_chief = (FLAGS.task_index == 0)
 
     # Assigns ops to the local worker by default.
     with tf.device(tf.train.replica_device_setter(
