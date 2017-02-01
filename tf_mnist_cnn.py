@@ -63,7 +63,7 @@ def main(_):
   correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
   accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-  with tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=True)) as sess:
+  with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
     sess.run(tf.initialize_all_variables())
 
     for i in range(FLAGS.steps):
