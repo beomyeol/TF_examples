@@ -33,7 +33,7 @@ def main(_):
                            job_name="worker",
                            task_index=FLAGS.task_index)
 
-  is_chief = (FLAGS.task_index == 1)
+  is_chief = (FLAGS.task_index == 0)
 
   if not is_chief:
     server.join()
@@ -53,6 +53,7 @@ def main(_):
       y_ = tf.placeholder(tf.float32, [None, 10])
 
       loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(y, y_))
+      tf.summary.scalar("loss", loss)
       global_step = tf.Variable(0)
 
       train_op = tf.train.AdagradOptimizer(0.1).minimize(
@@ -68,7 +69,7 @@ def main(_):
     mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
 
     # Create a "supervisor", which oversees the training process.
-    sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 1),
+    sv = tf.train.Supervisor(is_chief=is_chief,
                              logdir="/tmp/train_logs",
                              init_op=init_op,
                              summary_op=summary_op,
