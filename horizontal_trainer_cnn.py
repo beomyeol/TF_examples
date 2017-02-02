@@ -125,10 +125,10 @@ def main(_):
         # See `tf.train.SyncReplicasOptimizer` for additional details on how to
         # perform *synchronous* training.
         batch = mnist.train.next_batch(batch_size)
+        _, step = sess.run([train_op, global_step], feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
         if step % 50 == 0:
           train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0}, session=sess)
           print("step %d, training accuracy %g" % (step, train_accuracy))
-        _, step = sess.run([train_op, global_step], feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
           #print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
 
       end_time = time.clock()
