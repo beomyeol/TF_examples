@@ -9,11 +9,6 @@ tf.app.flags.DEFINE_integer("steps", 100, "Number of training steps")
 FLAGS = tf.app.flags.FLAGS
 batch_size = 100
 
-def seconds_to_string(t):
-    return "%d:%02d:%02d.%03d" % \
-        reduce(lambda ll,b : divmod(ll[0],b) + ll[1:],
-            [(t*1000,),1000,60,60])
-
 def weight_variable(shape):
   initial = tf.truncated_normal(shape, stddev=0.1)
   #initial = tf.constant(0.1, shape=shape)
@@ -71,11 +66,11 @@ def main(_):
   accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
   with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
-    start_time = time.clock()
+    start_time = time.time()
     sess.run(tf.initialize_all_variables())
-    end_time = time.clock()
-    print "Initialization time: ", seconds_to_string(end_time - start_time)
-    start_time = time.clock()
+    end_time = time.time()
+    print "Initialization time: ", (end_time - start_time)
+    start_time = time.time()
 
     for i in range(FLAGS.steps):
       batch = mnist.train.next_batch(batch_size)
@@ -85,12 +80,12 @@ def main(_):
         print("step %d, training accuracy %g" % (i, train_accuracy))
       #train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
 
-    end_time = time.clock()
-    print "Trianing time: ", seconds_to_string(end_time - start_time)
-    start_time = time.clock()
+    end_time = time.time()
+    print "Trianing time: ", (end_time - start_time)
+    start_time = time.time()
 
     print("test accuracy %g" % accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0}))
-    print "Testing time: ", seconds_to_string(time.clock() - start_time)
+    print "Testing time: ", (time.time() - start_time)
 
 if __name__ == "__main__":
   tf.app.run()
