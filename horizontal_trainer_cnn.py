@@ -72,13 +72,13 @@ def main(_):
 
       h_pool2_flat = tf.reshape(h_pool2, [-1, 7*7*64])
 
-    # Second worker
-    with tf.device("/job:worker/task:%d" % 1):
       W_fc1 = weight_variable([7 * 7 * 64, 1024])
       b_fc1 = bias_variable([1024])
 
       h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
 
+    # Second worker
+    with tf.device("/job:worker/task:%d" % 1):
       keep_prob = tf.placeholder(tf.float32)
       h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
 
