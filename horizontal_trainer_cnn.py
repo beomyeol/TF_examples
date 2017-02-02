@@ -98,7 +98,7 @@ def main(_):
       summary_op = tf.summary.merge_all()
       init_op = tf.global_variables_initializer()
 
-      correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1))
+      correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
       accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
     mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
