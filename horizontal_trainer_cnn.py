@@ -15,7 +15,8 @@ FLAGS = tf.app.flags.FLAGS
 batch_size = 100
 
 def weight_variable(shape):
-  initial = tf.truncated_normal(shape, stddev=0.1)
+  #initial = tf.truncated_normal(shape, stddev=0.1)
+  initial = tf.constant(0.1, shape=shape)
   return tf.Variable(initial)
 
 def bias_variable(shape):
