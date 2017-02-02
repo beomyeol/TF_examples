@@ -131,7 +131,7 @@ def main(_):
       print "Trianing time: ", (end_time - start_time)
       start_time = time.time()
 
-      train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0}, session=sess)
+      test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0}, session=sess)
       print("test accuracy %g" % (train_accuracy))
       print "Testing time: ", (time.time() - start_time)
 
