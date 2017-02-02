@@ -126,7 +126,7 @@ def main(_):
         # perform *synchronous* training.
         batch = mnist.train.next_batch(batch_size)
         if step % 50 == 0:
-          train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0})
+          train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0}, session=sess)
           print("step %d, training accuracy %g" % (step, train_accuracy))
         _, step = sess.run([train_op, global_step], feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
           #print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
@@ -136,7 +136,7 @@ def main(_):
       print "Trianing time: ", seconds_to_string(end_time - start_time)
       start_time = time.clock()
 
-      train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0})
+      train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0}, session=sess)
       print("test accuracy %g" % (train_accuracy))
       print "Testing time: ", seconds_to_string(time.clock() - start_time)
 
