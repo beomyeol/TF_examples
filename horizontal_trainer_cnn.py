@@ -2,6 +2,7 @@
 
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
+import time
 
 # Flags for defining the tf.train.ClusterSpec
 tf.app.flags.DEFINE_string("hosts", "",
@@ -14,9 +15,14 @@ tf.app.flags.DEFINE_integer("steps", 100, "Number of training steps")
 FLAGS = tf.app.flags.FLAGS
 batch_size = 100
 
+def seconds_to_string(t):
+    return "%d:%02d:%02d.%03d" % \
+        reduce(lambda ll,b : divmod(ll[0],b) + ll[1:],
+            [(t*1000,),1000,60,60])
+
 def weight_variable(shape):
-  #initial = tf.truncated_normal(shape, stddev=0.1)
-  initial = tf.constant(0.1, shape=shape)
+  initial = tf.truncated_normal(shape, stddev=0.1)
+  #initial = tf.constant(0.1, shape=shape)
   return tf.Variable(initial)
 
 def bias_variable(shape):
@@ -108,25 +114,31 @@ def main(_):
 
     # The supervisor takes care of session initialization, restoring from
     # a checkpoint, and closing when done or an error occurs.
-    with sv.managed_session(server.target) as sess:
+    with sv.managed_session(server.target, config=tf.ConfigProto(log_device_placement=True)) as sess:
       # Loop until the supervisor shuts down or 1000000 steps have completed.
       print "Start session"
+      start_time = time.clock()
       step = 0
       while not sv.should_stop() and step < FLAGS.steps:
         # Run a training step asynchronously.
         # See `tf.train.SyncReplicasOptimizer` for additional details on how to
         # perform *synchronous* training.
         batch = mnist.train.next_batch(batch_size)
-        _, step = sess.run([train_op, global_step], feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
         if step % 50 == 0:
           train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0})
           print("step %d, training accuracy %g" % (step, train_accuracy))
+        _, step = sess.run([train_op, global_step], feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
           #print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
 
-      print "Training complete"
+      end_time = time.clock()
+      #print "Training complete"
+      print "Trianing time: ", seconds_to_string(end_time - start_time)
+      start_time = time.clock()
 
-    train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0})
-    print("test accuracy %g" % (train_accuracy))
+      train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0})
+      print("test accuracy %g" % (train_accuracy))
+      print "Testing time: ", seconds_to_string(time.clock() - start_time)
+
     print "Processing complete"
     # Ask for all the services to stop.
     sv.stop()
