@@ -119,7 +119,7 @@ def main(_):
     with sv.managed_session(server.target, config=tf.ConfigProto(log_device_placement=True)) as sess:
       # Loop until the supervisor shuts down or 1000000 steps have completed.
       print "Start session"
-      start_time = time.clock()
+      start_time = time.time()
       step = 0
       while not sv.should_stop() and step < FLAGS.steps:
         # Run a training step asynchronously.
@@ -132,14 +132,14 @@ def main(_):
           print("step %d, training accuracy %g" % (step, train_accuracy))
           #print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
 
-      end_time = time.clock()
+      end_time = time.time()
       #print "Training complete"
-      print "Trianing time: ", seconds_to_string(end_time - start_time)
-      start_time = time.clock()
+      print "Trianing time: ", (end_time - start_time)
+      start_time = time.time()
 
       train_accuracy = accuracy.eval(feed_dict={x:batch[0], y_: batch[1], keep_prob: 1.0}, session=sess)
       print("test accuracy %g" % (train_accuracy))
-      print "Testing time: ", seconds_to_string(time.clock() - start_time)
+      print "Testing time: ", (time.time() - start_time)
 
     print "Processing complete"
     # Ask for all the services to stop.
