@@ -29,7 +29,7 @@ tf.app.flags.DEFINE_integer('task_id', 0,
 tf.app.flags.DEFINE_string('train_dir', '/tmp/train_logs',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 10000000,
+tf.app.flags.DEFINE_integer('max_steps', 100,
                             """Number of batches to run.""")
 
 # To check the location of Saver
@@ -39,6 +39,15 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
 # Checkpoint options
 tf.app.flags.DEFINE_integer('save_interval_secs', 10 * 60,
                             'Save interval seconds.')
+
+# Summary
+tf.app.flags.DEFINE_integer(
+    'log_every_n_steps', 10,
+    'The frequency with which logs are print.')
+
+tf.app.flags.DEFINE_integer(
+    'save_summaries_secs', 600,
+    'The frequency with which summaries are saved, in seconds.')
 
 # Dataset
 tf.app.flags.DEFINE_string(
@@ -63,6 +72,16 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_integer(
     'num_preprocessing_threads', 4,
     'The number of threads used to create the batches.')
+
+# Learning rate
+tf.app.flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
+
+tf.app.flags.DEFINE_float(
+    'num_epochs_per_decay', 2.0,
+    'Number of epochs after which learning rate decays.')
+
+tf.app.flags.DEFINE_float(
+    'learning_rate_decay_factor', 0.94, 'Learning rate decay factor.')
 
 # Optimization
 tf.app.flags.DEFINE_float(
@@ -91,7 +110,115 @@ def _configure_optimizer(learning_rate):
       epsilon=FLAGS.opt_epsilon)
   return optimizer
 
-def clone_fn(batch_queue):
+def get_train_op(dataset):
+  preprocessing_name = FLAGS.model_name
+  image_preprocessing_fn = preprocessing_factory.get_preprocessing(
+      preprocessing_name,
+      is_training=True)
+
+  # Data provider
+  provider = slim.dataset_data_provider.DatasetDataProvider(
+      dataset,
+      num_readers=FLAGS.num_readers,
+      common_queue_capacity=20 * FLAGS.batch_size,
+      common_queue_min=10 * FLAGS.batch_size)
+  [image, label] = provider.get(['image', 'label'])
+
+  train_image_size = network_fn.default_image_size
+
+  image = image_preprocessing_fn(image, train_image_size, train_image_size)
+
+  images, labels = tf.train.batch(
+      [image, label],
+      batch_size=FLAGS.batch_size,
+      num_threads=FLAGS.num_preprocessing_threads,
+      capacity=5 * FLAGS.batch_size)
+  labels = slim.one_hot_encoding(labels, dataset.num_classes)
+  # batch_queue = slim.prefetch_queue.prefetch_queue(
+  #     [images, labels], capacity=2 * deploy_config.num_clones)
+
+  # Build model
+  network_fn = nets_factory.get_network_fn(
+      FLAGS.model_name,
+      num_classes=dataset.num_classes,
+      weight_decay=FLAGS.weight_decay,
+      is_training=True)
+
+  logits, end_points = network_fn(images)
+
+  if 'AuxLogits' in end_points:
+      slim.losses.softmax_cross_entropy(
+          end_points['AuxLogits'], labels,
+          label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
+    slim.losses.softmax_cross_entropy(
+        logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
+
+  # Gather initial summaries
+  summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
+
+  # Add summaries for end_points
+  for end_point in end_points:
+    x = end_points[end_point]
+    summaries.add(tf.histogram_summary('activations/' + end_point, x))
+    summaries.add(tf.scalar_summary('sparsity/' + end_point,
+                                    tf.nn.zero_fraction(x)))
+
+  # Add summaries for losses.
+  for loss in tf.get_collection(tf.GraphKeys.LOSSES, first_clone_scope):
+    summaries.add(tf.scalar_summary('losses/%s' % loss.op.name, loss))
+
+  # Add summaries for variables.
+  for variable in slim.get_model_variables():
+    summaries.add(tf.histogram_summary(variable.op.name, variable))
+
+  # Configure the optimization
+  learning_rate = _configure_learning_rate(dataset.num_samples, global_step)
+  optimizer = _configure_optimizer(learning_rate)
+
+  losses = tf.get_collection(slim.losses.LOSSES_COLLECTION)
+  losses += tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+
+  total_loss = tf.add_n(losses, name='total_loss')
+
+  # Add total_loss to summary.
+  summaries.add(tf.scalar_summary('total_loss', total_loss,
+                                  name='total_loss'))
+
+  # Compute gradients with respect to the loss.
+  grads = opt.compute_gradients(total_loss)
+
+  # Add histograms for gradients.
+  for grad, var in grads:
+    if grad is not None:
+      tf.histogram_summary(var.op.name + '/gradients', grad)
+
+  apply_gradients_op = opt.apply_gradients(grads, global_step=global_step)
+
+  train_op = control_flow_ops.with_dependencies([apply_gradients_op], total_loss,
+                                                name='train_op')
+
+  summary_op = tf.merge_summary(list(summaries), name='summary_op')
+
+  return train_op, summary_op
+
+def train(dataset):
+  train_op, summary_op = get_train_op(dataset)
+
+  hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
+  summary_hook = tf.train.SummarySaverHook(save_steps=50,
+                                           output_dir=FLAGS.train_dir,
+                                           summary_op=summary_op)
+  hooks.append(summary_hook)
+
+
+  with tf.train.MonitoredTrainingSetssion(master=server.target,
+                                          is_chief=is_chief,
+                                          #checkpoint_dir=FLAGS.train_dir,
+                                          checkpoint_dir=None,
+                                          save_summaries_steps=None, # disable default summary saver
+                                          hooks=hooks) as mon_sess:
+    while not mon_sess.should_stop():
+      mon_sess.run(train_op)
 
 
 def train_distributed_worker(cluster_spec, dataset):
@@ -101,99 +228,15 @@ def train_distributed_worker(cluster_spec, dataset):
     worker_device="/job:worker/task:%d" % FLAGS.task_id,
     cluster=cluster_spec)):
 
-    global_step=tf.contrib.framework.get_or_create_global_step()
+    global_step = tf.contrib.framework.get_or_create_global_step()
+    train_op, summary_op = get_train_op(dataset)
 
-    preprocessing_name = FLAGS.model_name
-    image_preprocessing_fn = preprocessing_factory.get_preprocessing(
-        preprocessing_name,
-        is_training=True)
-
-    # Data provider
-    provider = slim.dataset_data_provider.DatasetDataProvider(
-        dataset,
-        num_readers=FLAGS.num_readers,
-        common_queue_capacity=20 * FLAGS.batch_size,
-        common_queue_min=10 * FLAGS.batch_size)
-    [image, label] = provider.get(['image', 'label'])
-
-    train_image_size = network_fn.default_image_size
-
-    image = image_preprocessing_fn(image, train_image_size, train_image_size)
-
-    images, labels = tf.train.batch(
-        [image, label],
-        batch_size=FLAGS.batch_size,
-        num_threads=FLAGS.num_preprocessing_threads,
-        capacity=5 * FLAGS.batch_size)
-    labels = slim.one_hot_encoding(labels, dataset.num_classes)
-    # batch_queue = slim.prefetch_queue.prefetch_queue(
-    #     [images, labels], capacity=2 * deploy_config.num_clones)
-
-    # Build model
-    network_fn = nets_factory.get_network_fn(
-        FLAGS.model_name,
-        num_classes=dataset.num_classes,
-        weight_decay=FLAGS.weight_decay,
-        is_training=True)
-
-    logits, end_points = network_fn(images)
-
-    if 'AuxLogits' in end_points:
-        slim.losses.softmax_cross_entropy(
-            end_points['AuxLogits'], labels,
-            label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
-      slim.losses.softmax_cross_entropy(
-          logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
-
-    # Gather initial summaries
-    summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
-
-    # Add summaries for end_points
-    for end_point in end_points:
-      x = end_points[end_point]
-      summaries.add(tf.histogram_summary('activations/' + end_point, x))
-      summaries.add(tf.scalar_summary('sparsity/' + end_point,
-                                      tf.nn.zero_fraction(x)))
-
-    # Add summaries for losses.
-    for loss in tf.get_collection(tf.GraphKeys.LOSSES, first_clone_scope):
-      summaries.add(tf.scalar_summary('losses/%s' % loss.op.name, loss))
-
-    # Add summaries for variables.
-    for variable in slim.get_model_variables():
-      summaries.add(tf.histogram_summary(variable.op.name, variable))
-
-    # Configure the optimization
-    learning_rate = _configure_learning_rate(dataset.num_samples, global_step)
-    optimizer = _configure_optimizer(learning_rate)
-
-    losses = tf.get_collection(slim.losses.LOSSES_COLLECTION)
-    losses += tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-
-    total_loss = tf.add_n(losses, name='total_loss')
-
-    # Add total_loss to summary.
-    summaries.add(tf.scalar_summary('total_loss', total_loss,
-                                    name='total_loss'))
-
-    # Compute gradients with respect to the loss.
-    grads = opt.compute_gradients(total_loss)
-
-    # Add histograms for gradients.
-    for grad, var in grads:
-      if grad is not None:
-        tf.histogram_summary(var.op.name + '/gradients', grad)
-
-    apply_gradients_op = opt.apply_gradients(grads, global_step=global_step)
-
-    train_op = control_flow_ops.with_dependencies([apply_gradients_op], total_loss,
-                                                  name='train_op')
-
-  hooks=[tf.train.StopAtStepHook(last_step=100)]
+  hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
 
   with tf.train.MonitoredTrainingSetssion(master=server.target,
                                           is_chief=is_chief,
                                           checkpoint_dir=FLAGS.train_dir,
+                                          save_summaries_steps=None, # disable default summary saver
                                           hooks=hooks) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(train_op)
