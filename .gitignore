@@ -1,3 +1,5 @@
 MNIST_data/
 
 *.pyc
+
+sftp-config.json
