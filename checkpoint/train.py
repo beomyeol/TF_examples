@@ -250,17 +250,22 @@ def get_train_op(dataset):
 
   summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
-  return train_op, summary_op
+  logging_tensors = {'step': global_step, 'loss': total_loss}
+
+  return train_op, summary_op, logging_tensors
 
 def train(dataset):
-  train_op, summary_op = get_train_op(dataset)
+  train_op, summary_op, logging_tensors = get_train_op(dataset)
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
   summary_hook = tf.train.SummarySaverHook(save_steps=50,
                                            output_dir=FLAGS.train_dir,
                                            summary_op=summary_op)
-  hooks.append(summary_hook)
+  logging_hook = tf.train.LoggingTensorHook(tensors=logging_tensors,
+                                            every_n_iter=10)
 
+  hooks.append(summary_hook)
+  hooks.append(logging_hook)
 
   with tf.train.MonitoredTrainingSession(#checkpoint_dir=FLAGS.train_dir,
                                          checkpoint_dir=None,
@@ -277,7 +282,7 @@ def train_distributed_worker(cluster_spec, server, dataset):
     worker_device="/job:worker/task:%d" % FLAGS.task_id,
     cluster=cluster_spec)):
 
-    train_op, summary_op = get_train_op(dataset)
+    train_op, summary_op, logging_tensors = get_train_op(dataset)
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
 
