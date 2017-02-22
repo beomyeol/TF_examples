@@ -283,7 +283,7 @@ def train(dataset):
 
 
 def train_distributed_worker(cluster_spec, server, dataset):
-  is_cheif = (FLAGS.task_id == 0)
+  is_chief = (FLAGS.task_id == 0)
 
   with tf.device(tf.train.replica_device_setter(
     worker_device="/job:worker/task:%d" % FLAGS.task_id,
@@ -303,7 +303,7 @@ def train_distributed_worker(cluster_spec, server, dataset):
       hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=FLAGS.train_dir,
                                                 save_steps=FLAGS.save_steps,
                                                 save_secs=FLAGS.save_secs,
-                                                saver=tf.train.Saver(sharded=True)))
+                                                saver=tf.train.Saver()))
 
   with tf.train.MonitoredTrainingSession(master=server.target,
                                          is_chief=is_chief,
