@@ -84,7 +84,15 @@ tf.app.flags.DEFINE_float(
 tf.app.flags.DEFINE_float(
     'learning_rate_decay_factor', 0.94, 'Learning rate decay factor.')
 
+tf.app.flags.DEFINE_float(
+    'label_smoothing', 0.0, 'The amount of label smoothing.')
+
 # Optimization
+tf.app.flags.DEFINE_string(
+    'optimizer', 'rmsprop',
+    'The name of the optimizer, one of "adadelta", "adagrad", "adam",'
+    '"ftrl", "momentum", "sgd" or "rmsprop".')
+
 tf.app.flags.DEFINE_float(
     'weight_decay', 0.00004, 'The weight decay on the model weights.')
 
@@ -103,15 +111,59 @@ def _configure_learning_rate(num_samples_per_epoch, global_step):
                                       name='exponential_decay_learning_rate')
 
 def _configure_optimizer(learning_rate):
-  # TODO: can be extended
-  optimizer = tf.train.RMSPropOptimizer(
-      learning_rate,
-      decay=FLAGS.rmsprop_decay,
-      momentum=FLAGS.rmsprop_momentum,
-      epsilon=FLAGS.opt_epsilon)
+  """Configures the optimizer used for training.
+
+  Args:
+    learning_rate: A scalar or `Tensor` learning rate.
+
+  Returns:
+    An instance of an optimizer.
+
+  Raises:
+    ValueError: if FLAGS.optimizer is not recognized.
+  """
+  if FLAGS.optimizer == 'adadelta':
+    optimizer = tf.train.AdadeltaOptimizer(
+        learning_rate,
+        rho=FLAGS.adadelta_rho,
+        epsilon=FLAGS.opt_epsilon)
+  elif FLAGS.optimizer == 'adagrad':
+    optimizer = tf.train.AdagradOptimizer(
+        learning_rate,
+        initial_accumulator_value=FLAGS.adagrad_initial_accumulator_value)
+  elif FLAGS.optimizer == 'adam':
+    optimizer = tf.train.AdamOptimizer(
+        learning_rate,
+        beta1=FLAGS.adam_beta1,
+        beta2=FLAGS.adam_beta2,
+        epsilon=FLAGS.opt_epsilon)
+  elif FLAGS.optimizer == 'ftrl':
+    optimizer = tf.train.FtrlOptimizer(
+        learning_rate,
+        learning_rate_power=FLAGS.ftrl_learning_rate_power,
+        initial_accumulator_value=FLAGS.ftrl_initial_accumulator_value,
+        l1_regularization_strength=FLAGS.ftrl_l1,
+        l2_regularization_strength=FLAGS.ftrl_l2)
+  elif FLAGS.optimizer == 'momentum':
+    optimizer = tf.train.MomentumOptimizer(
+        learning_rate,
+        momentum=FLAGS.momentum,
+        name='Momentum')
+  elif FLAGS.optimizer == 'rmsprop':
+    optimizer = tf.train.RMSPropOptimizer(
+        learning_rate,
+        decay=FLAGS.rmsprop_decay,
+        momentum=FLAGS.rmsprop_momentum,
+        epsilon=FLAGS.opt_epsilon)
+  elif FLAGS.optimizer == 'sgd':
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+  else:
+    raise ValueError('Optimizer [%s] was not recognized', FLAGS.optimizer)
   return optimizer
 
 def get_train_op(dataset):
+  global_step = tf.contrib.framework.get_or_create_global_step()
+
   preprocessing_name = FLAGS.model_name
   image_preprocessing_fn = preprocessing_factory.get_preprocessing(
       preprocessing_name,
@@ -164,7 +216,7 @@ def get_train_op(dataset):
                                     tf.nn.zero_fraction(x)))
 
   # Add summaries for losses.
-  for loss in tf.get_collection(tf.GraphKeys.LOSSES, first_clone_scope):
+  for loss in tf.get_collection(tf.GraphKeys.LOSSES):
     summaries.add(tf.scalar_summary('losses/%s' % loss.op.name, loss))
 
   # Add summaries for variables.
@@ -175,7 +227,7 @@ def get_train_op(dataset):
   learning_rate = _configure_learning_rate(dataset.num_samples, global_step)
   optimizer = _configure_optimizer(learning_rate)
 
-  losses = tf.get_collection(slim.losses.LOSSES_COLLECTION)
+  losses = tf.get_collection(tf.GraphKeys.LOSSES)
   losses += tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
   total_loss = tf.add_n(losses, name='total_loss')
@@ -185,14 +237,14 @@ def get_train_op(dataset):
                                   name='total_loss'))
 
   # Compute gradients with respect to the loss.
-  grads = opt.compute_gradients(total_loss)
+  grads = optimizer.compute_gradients(total_loss)
 
   # Add histograms for gradients.
   for grad, var in grads:
     if grad is not None:
       tf.histogram_summary(var.op.name + '/gradients', grad)
 
-  apply_gradients_op = opt.apply_gradients(grads, global_step=global_step)
+  apply_gradients_op = optimizer.apply_gradients(grads, global_step=global_step)
 
   train_op = control_flow_ops.with_dependencies([apply_gradients_op], total_loss,
                                                 name='train_op')
@@ -228,7 +280,6 @@ def train_distributed_worker(cluster_spec, dataset):
     worker_device="/job:worker/task:%d" % FLAGS.task_id,
     cluster=cluster_spec)):
 
-    global_step = tf.contrib.framework.get_or_create_global_step()
     train_op, summary_op = get_train_op(dataset)
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
