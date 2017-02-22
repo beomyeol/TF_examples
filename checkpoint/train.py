@@ -38,8 +38,11 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 
 # Checkpoint options
-tf.app.flags.DEFINE_integer('save_interval_secs', 10 * 60,
-                            'Save interval seconds.')
+tf.app.flags.DEFINE_integer('save_secs', None,
+                            'Checkpoint save interval seconds.')
+
+tf.app.flags.DEFINE_integer('save_steps', None,
+                            'Checkpoint save interval steps')
 
 # Summary
 tf.app.flags.DEFINE_integer(
@@ -258,18 +261,22 @@ def train(dataset):
   train_op, summary_op, logging_tensors = get_train_op(dataset)
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
-  summary_hook = tf.train.SummarySaverHook(save_steps=50,
-                                           output_dir=FLAGS.train_dir,
-                                           summary_op=summary_op)
-  logging_hook = tf.train.LoggingTensorHook(tensors=logging_tensors,
-                                            every_n_iter=10)
+  hooks.append(tf.train.LoggingTensorHook(tensors=logging_tensors,
+                                          every_n_iter=10))
 
-  hooks.append(summary_hook)
-  hooks.append(logging_hook)
+  hooks.append(tf.train.SummarySaverHook(save_steps=50,
+                                         output_dir=FLAGS.train_dir,
+                                         summary_op=summary_op))
+
+  if FLAGS.save_steps or FLAGS.save_secs:
+    hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=FLAGS.train_dir,
+                                              save_steps=FLAGS.save_steps,
+                                              save_secs=FLAGS.save_secs,
+                                              saver=tf.train.Saver()))
 
   with tf.train.MonitoredTrainingSession(#checkpoint_dir=FLAGS.train_dir,
-                                         checkpoint_dir=None,
                                          save_summaries_steps=None, # disable default summary saver
+                                         save_checkpoint_secs=None, # disable default checckpoint saver
                                          hooks=hooks) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(train_op)
@@ -285,11 +292,24 @@ def train_distributed_worker(cluster_spec, server, dataset):
     train_op, summary_op, logging_tensors = get_train_op(dataset)
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
+  hooks.append(tf.train.LoggingTensorHook(tensors=logging_tensors,
+                                          every_n_iter=10))
+
+  if is_chief:
+    hooks.append(tf.train.SummarySaverHook(save_steps=50,
+                                           output_dir=FLAGS.train_dir,
+                                           summary_op=summary_op))
+    if FLAGS.save_steps or FLAGS.save_secs:
+      hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=FLAGS.train_dir,
+                                                save_steps=FLAGS.save_steps,
+                                                save_secs=FLAGS.save_secs,
+                                                saver=tf.train.Saver(sharded=True)))
 
   with tf.train.MonitoredTrainingSession(master=server.target,
                                          is_chief=is_chief,
-                                         checkpoint_dir=FLAGS.train_dir,
+                                         #checkpoint_dir=FLAGS.train_dir,
                                          save_summaries_steps=None, # disable default summary saver
+                                         save_checkpoint_secs=None, # disable default checckpoint saver
                                          hooks=hooks) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(train_op)
@@ -320,10 +340,13 @@ def main(_):
   assert FLAGS.type in ['single', 'distributed'], 'type must be either "single" or "distributed"'
 
   if not FLAGS.dataset_dir:
-      raise ValueError('You must supply the dataset directory with --dataset_dir')
+    raise ValueError('You must supply the dataset directory with --dataset_dir')
 
   dataset = dataset_factory.get_dataset(
       FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
+
+  if FLAGS.save_steps and FLAGS.save_secs:
+    raise ValueError('Either --save_steps or --save_secs must be set, not both')
 
   if FLAGS.type == 'single':
     train(dataset)
