@@ -199,11 +199,11 @@ def get_train_op(dataset):
   logits, end_points = network_fn(images)
 
   if 'AuxLogits' in end_points:
-    slim.losses.softmax_cross_entropy(
+    tf.losses.softmax_cross_entropy(
         end_points['AuxLogits'], labels,
-        label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
-  slim.losses.softmax_cross_entropy(
-      logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
+        label_smoothing=FLAGS.label_smoothing, weights=0.4, scope='aux_loss')
+  tf.losses.softmax_cross_entropy(
+      logits, labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
 
   # Gather initial summaries
   summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
@@ -211,17 +211,17 @@ def get_train_op(dataset):
   # Add summaries for end_points
   for end_point in end_points:
     x = end_points[end_point]
-    summaries.add(tf.histogram_summary('activations/' + end_point, x))
-    summaries.add(tf.scalar_summary('sparsity/' + end_point,
+    summaries.add(tf.summary.histogram('activations/' + end_point, x))
+    summaries.add(tf.summary.scalar('sparsity/' + end_point,
                                     tf.nn.zero_fraction(x)))
 
   # Add summaries for losses.
   for loss in tf.get_collection(tf.GraphKeys.LOSSES):
-    summaries.add(tf.scalar_summary('losses/%s' % loss.op.name, loss))
+    summaries.add(tf.summary.scalar('losses/%s' % loss.op.name, loss))
 
   # Add summaries for variables.
   for variable in slim.get_model_variables():
-    summaries.add(tf.histogram_summary(variable.op.name, variable))
+    summaries.add(tf.summary.histogram(variable.op.name, variable))
 
   # Configure the optimization
   learning_rate = _configure_learning_rate(dataset.num_samples, global_step)
@@ -233,8 +233,7 @@ def get_train_op(dataset):
   total_loss = tf.add_n(losses, name='total_loss')
 
   # Add total_loss to summary.
-  summaries.add(tf.scalar_summary('total_loss', total_loss,
-                                  name='total_loss'))
+  summaries.add(tf.summary.scalar('total_loss', total_loss))
 
   # Compute gradients with respect to the loss.
   grads = optimizer.compute_gradients(total_loss)
@@ -242,14 +241,14 @@ def get_train_op(dataset):
   # Add histograms for gradients.
   for grad, var in grads:
     if grad is not None:
-      tf.histogram_summary(var.op.name + '/gradients', grad)
+      tf.summary.histogram(var.op.name + '/gradients', grad)
 
   apply_gradients_op = optimizer.apply_gradients(grads, global_step=global_step)
 
   train_op = control_flow_ops.with_dependencies([apply_gradients_op], total_loss,
                                                 name='train_op')
 
-  summary_op = tf.merge_summary(list(summaries), name='summary_op')
+  summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
   return train_op, summary_op
 
@@ -263,17 +262,15 @@ def train(dataset):
   hooks.append(summary_hook)
 
 
-  with tf.train.MonitoredTrainingSetssion(master=server.target,
-                                          is_chief=is_chief,
-                                          #checkpoint_dir=FLAGS.train_dir,
-                                          checkpoint_dir=None,
-                                          save_summaries_steps=None, # disable default summary saver
-                                          hooks=hooks) as mon_sess:
+  with tf.train.MonitoredTrainingSession(#checkpoint_dir=FLAGS.train_dir,
+                                         checkpoint_dir=None,
+                                         save_summaries_steps=None, # disable default summary saver
+                                         hooks=hooks) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(train_op)
 
 
-def train_distributed_worker(cluster_spec, dataset):
+def train_distributed_worker(cluster_spec, server, dataset):
   is_cheif = (FLAGS.task_id == 0)
 
   with tf.device(tf.train.replica_device_setter(
@@ -284,11 +281,11 @@ def train_distributed_worker(cluster_spec, dataset):
 
   hooks = [tf.train.StopAtStepHook(last_step=FLAGS.max_steps)]
 
-  with tf.train.MonitoredTrainingSetssion(master=server.target,
-                                          is_chief=is_chief,
-                                          checkpoint_dir=FLAGS.train_dir,
-                                          save_summaries_steps=None, # disable default summary saver
-                                          hooks=hooks) as mon_sess:
+  with tf.train.MonitoredTrainingSession(master=server.target,
+                                         is_chief=is_chief,
+                                         checkpoint_dir=FLAGS.train_dir,
+                                         save_summaries_steps=None, # disable default summary saver
+                                         hooks=hooks) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(train_op)
 
@@ -311,7 +308,7 @@ def distributed_train(dataset):
   if FLAGS.job_name == 'ps':
     server.join()
   else:
-    train_distributed_worker(cluster_spec, dataset)
+    train_distributed_worker(cluster_spec, server, dataset)
 
 
 def main(_):
