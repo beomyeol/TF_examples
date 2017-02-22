@@ -4,7 +4,7 @@
 TRAIN_DIR=/tmp/cifarnet-model
 
 # Where the dataset is saved to.
-DATASET_DIR=/tmp/cifar10
+DATASET_DIR=/dataset/cifar10
 
 # Download the dataset
 python download_and_convert_data.py \
@@ -18,7 +18,6 @@ python train.py \
   --dataset_split_name=train \
   --dataset_dir=${DATASET_DIR} \
   --model_name=cifarnet \
-  #--preprocessing_name=cifarnet \
   --max_steps=100 \
   --batch_size=128 \
   --save_interval_secs=120 \
@@ -28,3 +27,4 @@ python train.py \
   --learning_rate_decay_factor=0.1 \
   --num_epochs_per_decay=200 \
   --weight_decay=0.004
+  #--preprocessing_name=cifarnet \

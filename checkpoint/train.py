@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
 from datasets import dataset_factory
 from nets import nets_factory
+from preprocessing import preprocessing_factory
 
 slim = tf.contrib.slim
 
@@ -124,6 +125,12 @@ def get_train_op(dataset):
       common_queue_min=10 * FLAGS.batch_size)
   [image, label] = provider.get(['image', 'label'])
 
+  network_fn = nets_factory.get_network_fn(
+      FLAGS.model_name,
+      num_classes=dataset.num_classes,
+      weight_decay=FLAGS.weight_decay,
+      is_training=True)
+
   train_image_size = network_fn.default_image_size
 
   image = image_preprocessing_fn(image, train_image_size, train_image_size)
@@ -137,21 +144,14 @@ def get_train_op(dataset):
   # batch_queue = slim.prefetch_queue.prefetch_queue(
   #     [images, labels], capacity=2 * deploy_config.num_clones)
 
-  # Build model
-  network_fn = nets_factory.get_network_fn(
-      FLAGS.model_name,
-      num_classes=dataset.num_classes,
-      weight_decay=FLAGS.weight_decay,
-      is_training=True)
-
   logits, end_points = network_fn(images)
 
   if 'AuxLogits' in end_points:
-      slim.losses.softmax_cross_entropy(
-          end_points['AuxLogits'], labels,
-          label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
     slim.losses.softmax_cross_entropy(
-        logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
+        end_points['AuxLogits'], labels,
+        label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
+  slim.losses.softmax_cross_entropy(
+      logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
 
   # Gather initial summaries
   summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
@@ -242,7 +242,7 @@ def train_distributed_worker(cluster_spec, dataset):
       mon_sess.run(train_op)
 
 
-def distributed_train():
+def distributed_train(dataset):
   assert FLAGS.job_name in ['ps', 'worker'], 'job_name must be ps or worker'
 
   ps_hosts = FLAGS.ps_hosts.split(',')
@@ -260,22 +260,22 @@ def distributed_train():
   if FLAGS.job_name == 'ps':
     server.join()
   else:
-    if not FLAGS.dataset_dir:
-      raise ValueError('You must supply the dataset directory with --dataset_dir')
-
-    dataset = dataset_factory.get_dataset(
-      FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
-
     train_distributed_worker(cluster_spec, dataset)
 
 
 def main(_):
   assert FLAGS.type in ['single', 'distributed'], 'type must be either "single" or "distributed"'
 
+  if not FLAGS.dataset_dir:
+      raise ValueError('You must supply the dataset directory with --dataset_dir')
+
+  dataset = dataset_factory.get_dataset(
+      FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
+
   if FLAGS.type == 'single':
-    single_train()
+    train(dataset)
   else:
-    distributed_train()
+    distributed_train(dataset)
 
 if __name__ == '__main__':
   tf.logging.set_verbosity(tf.logging.INFO)
