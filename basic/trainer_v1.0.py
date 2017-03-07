@@ -6,9 +6,6 @@ import tensorflow as tf
 
 from tensorflow.examples.tutorials.mnist import input_data
 
-tf.app.flags.DEFINE_boolean(
-    'ps_on_cpu', False, '')
-
 def weight_variable(shape):
   initial = tf.truncated_normal(shape, stddev=0.1)
   #initial = tf.constant(0.1, shape=shape)
@@ -45,7 +42,7 @@ def main(_):
     is_chief = (FLAGS.task_index == 0)
 
     ps_device = '/job:ps'
-    if ps_on_cpu:
+    if FLAGS.ps_on_cpu:
       ps_device += '/cpu'
 
     # Assigns ops to the local worker by default.
@@ -188,6 +185,11 @@ if __name__ == "__main__":
       type=int,
       default=32,
       help="Batch size")
+  parser.add_argument(
+      "--ps_on_cpu",
+      type=bool,
+      default=False,
+      help="Whether ps operations is placed on CPU or not")
   FLAGS, unparsed = parser.parse_known_args()
   tf.logging.set_verbosity(tf.logging.INFO)
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
